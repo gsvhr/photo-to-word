@@ -3,25 +3,15 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
-import json
-from pathlib import Path
-from PIL import Image, ImageTk
 import threading
 import logging
 from datetime import datetime
+from pathlib import Path
+from PIL import ImageTk  # type: ignore
 
 from src.config import AppConfig
 from src.image_processor import ImageProcessor
 from src.word_generator import WordGenerator
-
-# Попытка импорта psutil
-try:
-    import psutil
-
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-    logging.warning("psutil не установлен, проверка места на диске отключена")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -795,17 +785,6 @@ class PhotoTableApp:
 
         if not filepath:
             return
-
-        if PSUTIL_AVAILABLE:
-            try:
-                disk = psutil.disk_usage(os.path.splitdrive(filepath)[0])
-                if disk.free < 50 * 1024 * 1024:
-                    if not messagebox.askyesno(
-                        "Предупреждение", "Мало места на диске. Продолжить?"
-                    ):
-                        return
-            except:
-                pass
 
         self.btn_generate.config(state="disabled")
         self.btn_cancel.config(state="normal")
