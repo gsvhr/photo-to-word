@@ -1,0 +1,5 @@
+[MESSAGES CONTROL]
+disable=
+    E0401,  # unable to import
+    E0611,  # no name in module
+    C0411,  # wrong import order (порядок импортов)
