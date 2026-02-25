@@ -1,3 +1,6 @@
+"""Инициализация приложения PhotoTable."""
+
+
 def __init__(self):
     self.tooltip_text = None
     self.tooltip_x = None

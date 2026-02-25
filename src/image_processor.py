@@ -119,7 +119,7 @@ class ImageProcessor:
         logger.info("Все изображения очищены")
 
     def process_for_word(
-        self, image_path: str, target_width: int, quality: int, rotation: int = 0
+        self, image_path: str, target_width: int, rotation: int = 0
     ) -> Image.Image:
         """Обработать изображение для вставки в Word с учетом поворота."""
         with Image.open(image_path) as img:

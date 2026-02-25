@@ -24,6 +24,7 @@ class WordGenerator:
         self.image_processor = image_processor
         self.document = None
         self.cancel_requested = False
+        self.table_width_cm = None
 
     def create_document(
         self, orientation: str = "portrait", table_width_cm: float = 16
@@ -131,7 +132,7 @@ class WordGenerator:
                 # Обработка изображения
                 try:
                     img = self.image_processor.process_for_word(
-                        img_path, target_width, quality, rotations[i]
+                        img_path, target_width, rotations[i]
                     )
                 except Exception as e:
                     logger.error(f"Ошибка обработки изображения {img_path}: {e}")
