@@ -5,7 +5,6 @@
 """
 
 import os
-import sys
 import PyInstaller.__main__
 
 
@@ -16,12 +15,12 @@ def build():
     icon_path = "icon.ico"
     if not os.path.exists(icon_path):
         print("ВНИМАНИЕ: Файл icon.ico не найден. Приложение будет без иконки.")
-        icon_path = ""
+        icon_path = None
 
-    # Параметры сборки
+    # Базовые параметры сборки
     args = [
         "main.py",
-        "--name=Фототаблица",
+        "--name=Фототаблица 1.0",
         "--onefile",
         "--windowed",
         "--add-data=src;src",
@@ -33,15 +32,9 @@ def build():
     if icon_path:
         args.append(f"--icon={icon_path}")
 
-    # Добавляем метаданные
-    args.extend(
-        [
-            "--version-file=version.txt" if os.path.exists("version.txt") else "",
-        ]
-    )
-
-    # Убираем пустые аргументы
-    args = [arg for arg in args if arg]
+    # Добавляем метаданные если есть файл версии
+    if os.path.exists("version.txt"):
+        args.append("--version-file=version.txt")
 
     print("Начинаем сборку...")
     print(f"Команда: pyinstaller {' '.join(args)}")
