@@ -1,16 +1,16 @@
 """Генератор Word документов с фотографиями."""
 
 import os
+import io
 import tempfile
-from typing import List, Optional, Callable
+from typing import Optional, Callable
 from pathlib import Path
 import logging
 from docx import Document
 from docx.shared import Cm, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_PARAGRAPH_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.section import WD_ORIENT
-from PIL import Image
-import io
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -65,9 +65,21 @@ class WordGenerator:
         progress_callback: Optional[Callable] = None,
     ) -> Optional[io.BytesIO]:
         """Сгенерировать документ и вернуть его как BytesIO объект."""
-        self.cancel_requested = False
-        self.create_document(orientation, table_width_cm)
 
+        self.cancel_requested = False
+
+        # === 1. ПРОВЕРКА СОЗДАНИЯ ДОКУМЕНТА ===
+        try:
+            self.create_document(orientation, table_width_cm)
+        except Exception as e:
+            logger.error(f"Ошибка при создании документа: {e}")
+            raise RuntimeError(f"Не удалось создать документ: {e}") from e
+
+        # === 2. ПРОВЕРКА ЧТО ДОКУМЕНТ СУЩЕСТВУЕТ ===
+        if self.document is None:
+            raise RuntimeError("Документ не был создан (self.document = None)")
+
+        # === 3. ПРОВЕРКА НАЛИЧИЯ ИЗОБРАЖЕНИЙ ===
         image_paths = self.image_processor.get_image_paths()
         total = len(image_paths)
 
@@ -85,84 +97,129 @@ class WordGenerator:
         col_width_cm = table_width_cm / cols
         col_width = Cm(col_width_cm)
 
-        # Создаем таблицу с фиксированной шириной
-        table = self.document.add_table(rows=0, cols=cols)
-        table.autofit = False
-        table.allow_autofit = False
-        table.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        # === 4. СОЗДАНИЕ ТАБЛИЦЫ (с проверкой) ===
+        try:
+            # Создаем таблицу с фиксированной шириной
+            table = self.document.add_table(rows=0, cols=cols)
+            table.autofit = False
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
-        # Устанавливаем ширину для всех колонок
-        for col in table.columns:
-            col.width = col_width
+            # Устанавливаем ширину для всех колонок
+            for col in table.columns:
+                col.width = col_width
+        except Exception as e:
+            logger.error(f"Ошибка при создании таблицы: {e}")
+            raise RuntimeError(f"Не удалось создать таблицу: {e}") from e
+
+        # Рассчитываем количество строк, которые понадобятся
+        rows_needed = (total + cols - 1) // cols  # округление вверх
+
+        # Создаем все строки заранее
+        for _ in range(rows_needed):
+            table.add_row()
 
         # Список временных файлов для удаления
         temp_files = []
 
         try:
             for i, img_path in enumerate(image_paths):
+                # Проверка отмены
                 if self.cancel_requested:
                     logger.info("Генерация отменена")
                     return None
 
-                # Обрабатываем изображение с учетом поворота
-                img = self.image_processor.process_for_word(
-                    img_path, target_width, quality, rotations[i]
-                )
+                # Обработка изображения
+                try:
+                    img = self.image_processor.process_for_word(
+                        img_path, target_width, quality, rotations[i]
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка обработки изображения {img_path}: {e}")
+                    raise RuntimeError(
+                        f"Не удалось обработать изображение {Path(img_path).name}: {e}"
+                    ) from e
 
-                # Сохраняем во временный файл
-                with tempfile.NamedTemporaryFile(
-                    suffix=".jpg", delete=False
-                ) as tmp_file:
-                    img.save(tmp_file.name, "JPEG", quality=quality)
-                    tmp_path = tmp_file.name
-                    temp_files.append(tmp_path)
+                # Сохранение во временный файл
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".jpg", delete=False
+                    ) as tmp_file:
+                        img.save(tmp_file.name, "JPEG", quality=quality)
+                        tmp_path = tmp_file.name
+                        temp_files.append(tmp_path)
+                except Exception as e:
+                    logger.error(f"Ошибка сохранения временного файла: {e}")
+                    raise RuntimeError(
+                        f"Не удалось сохранить временный файл: {e}"
+                    ) from e
 
-                # Добавляем строку в таблицу (каждые 2 изображения)
-                if i % cols == 0:
-                    row = table.add_row()
-
-                # Определяем ячейку в текущей строке
+                # Получаем строку и ячейку для текущего изображения
+                row = table.rows[i // cols]
                 cell = row.cells[i % cols]
 
-                # Добавляем изображение
-                paragraph = cell.paragraphs[0]
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                self._remove_paragraph_spacing(paragraph)
+                # === 5. ДОБАВЛЕНИЕ ИЗОБРАЖЕНИЯ ===
+                try:
+                    paragraph = cell.paragraphs[0]
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    self._remove_paragraph_spacing(paragraph)
 
-                run = paragraph.add_run()
-                run.add_picture(tmp_path, width=col_width)
+                    run = paragraph.add_run()
+                    run.add_picture(tmp_path, width=col_width)
+                except Exception as e:
+                    logger.error(f"Ошибка вставки изображения в ячейку: {e}")
+                    raise RuntimeError(f"Не удалось вставить изображение: {e}") from e
 
-                # Добавляем подпись
-                # Добавляем подпись с ограничением длины
-                caption_text = self.config.get_caption_text(i + 1, Path(img_path).stem)
-                caption_para = cell.add_paragraph()
-                caption_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                self._remove_paragraph_spacing(caption_para)
+                # === 6. ДОБАВЛЕНИЕ ПОДПИСИ ===
+                try:
+                    caption_text = self.config.get_caption_text(
+                        i + 1, Path(img_path).stem
+                    )
+                    caption_para = cell.add_paragraph()
+                    caption_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    self._remove_paragraph_spacing(caption_para)
 
-                caption_run = caption_para.add_run(caption_text)
-                caption_run.font.name = self.config.word_document_defaults["font_name"]
-                caption_run.font.size = Pt(
-                    self.config.word_document_defaults["font_size"]
-                )
+                    caption_run = caption_para.add_run(caption_text)
+                    caption_run.font.name = self.config.word_document_defaults[
+                        "font_name"
+                    ]
+                    caption_run.font.size = Pt(
+                        self.config.word_document_defaults["font_size"]
+                    )
 
-                # Защита от разрыва (фото + подпись на одной странице)
-                cell.paragraphs[0].paragraph_format.keep_with_next = True
+                    # Защита от разрыва (фото + подпись на одной странице)
+                    cell.paragraphs[0].paragraph_format.keep_with_next = True
+                except Exception as e:
+                    logger.error(f"Ошибка добавления подписи: {e}")
+                    # Не критично, продолжаем
+                    logger.warning(f"Пропуск подписи для изображения {i+1}")
 
+                # Прогресс
                 if progress_callback:
-                    progress_callback(i + 1, total)
+                    try:
+                        progress_callback(i + 1, total)
+                    except Exception as e:
+                        logger.warning(f"Ошибка в progress_callback: {e}")
 
-            # Сохраняем в память
-            docx_bytes = io.BytesIO()
-            self.document.save(docx_bytes)
-            docx_bytes.seek(0)
-
-            return docx_bytes
+            # === 7. СОХРАНЕНИЕ В ПАМЯТЬ ===
+            try:
+                docx_bytes = io.BytesIO()
+                self.document.save(docx_bytes)
+                docx_bytes.seek(0)
+                logger.info(
+                    f"Документ успешно сгенерирован: {len(docx_bytes.getvalue())} байт"
+                )
+                return docx_bytes
+            except Exception as e:
+                logger.error(f"Ошибка сохранения документа в память: {e}")
+                raise RuntimeError(f"Не удалось сохранить документ: {e}") from e
 
         finally:
-            # Удаляем временные файлы
+            # === 8. УДАЛЕНИЕ ВРЕМЕННЫХ ФАЙЛОВ ===
             for tmp_path in temp_files:
                 try:
-                    os.unlink(tmp_path)
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                        logger.debug(f"Удален временный файл: {tmp_path}")
                 except Exception as e:
                     logger.warning(f"Не удалось удалить временный файл {tmp_path}: {e}")
 

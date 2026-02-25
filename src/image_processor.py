@@ -1,10 +1,9 @@
 """Обработка изображений: загрузка, создание миниатюр, изменение размера."""
 
-import os
-from typing import List, Tuple, Optional, Dict
-from pathlib import Path
-from PIL import Image, ImageOps, UnidentifiedImageError
 import logging
+from typing import List, Tuple, Optional
+from pathlib import Path
+from PIL import Image, UnidentifiedImageError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
